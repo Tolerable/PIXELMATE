@@ -1,0 +1,6 @@
+# Ignore generated Python files and folders
+PIXELMATE-*.py
+*.json
+
+# Ignore the GENERATED folder which contains images
+GENERATED/*
