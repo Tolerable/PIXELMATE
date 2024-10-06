@@ -98,6 +98,13 @@ class PollinationsChatApp:
         self.image_menu.add_command(label="Copy Image", command=self.copy_image_to_clipboard)
 
 
+    def trim_conversation_history(self):
+        """Limit conversation history to the last 10 exchanges."""
+        max_messages = 10  # 5 user + 5 AI = 10 total
+        if len(self.conversation_history) > max_messages:
+            self.conversation_history = self.conversation_history[-max_messages:]  # Trim oldest messages
+
+
     def load_history(self):
         """Load prompt history from a JSON file."""
         if os.path.exists(HISTORY_FILE):
@@ -254,8 +261,6 @@ class PollinationsChatApp:
         """Returns the time elapsed since the last message in a human-readable format."""
         current_time = time.time()
         elapsed_time = current_time - self.last_message_time
-        self.last_message_time = current_time  # Reset the last message time
-        
         minutes = int(elapsed_time // 60)
         seconds = int(elapsed_time % 60)
         
@@ -269,46 +274,61 @@ class PollinationsChatApp:
         return time.time()
 
     def track_time(self, user_message):
-        """Track the passage of time without displaying it in chat."""
+        """Track the passage of time between user messages."""
         current_time = self.get_current_time()
 
         # If it's the first message, handle it differently
         if self.first_message:
-            # First message logic happens here (tracking starts)
-            self.first_message = False  # Mark that first message is done
+            time_prefix = "Time begins to flow: "
+            self.first_message = False
         else:
             # Calculate the time difference for subsequent messages
             elapsed_time = current_time - self.last_message_time
             elapsed_minutes = int(elapsed_time // 60)
             elapsed_seconds = int(elapsed_time % 60)
-            # Log or handle the time difference behind the scenes
-            # e.g., add to context, influence conversation flow
+            
+            if elapsed_minutes > 0:
+                time_prefix = f"[It has been {elapsed_minutes} minutes and {elapsed_seconds} seconds since the last message.] "
+            else:
+                time_prefix = f"[It has been {elapsed_seconds} seconds since the last message.] "
 
-        # Update last_message_time to the current time
+        # Update the last message time
         self.last_message_time = current_time
 
-        # Return the original message (unmodified)
-        return user_message
+        # Return the message with time prefix added
+        return f"{time_prefix}{user_message}"
+
 
     def send_text(self, event=None):
-        """Send the user input and track time behind the scenes."""
+        """Send the user input with time-awareness and track conversation history."""
         user_message = self.input_text.get("1.0", tk.END).strip()
+
+        # Don't send an empty message
         if not user_message:
-            messagebox.showwarning("Input Required", "Please enter a message.")
             return 'break'
 
-        # Track the time behind the scenes but keep the message unchanged
-        timed_message = self.track_time(user_message)
-
-        # Add to conversation and clear the input field
+        # Add user input to conversation history without time prefix
         self.conversation_history.append({"role": "user", "content": user_message})
-        self.update_chat("You", user_message)
-        self.input_text.delete("1.0", tk.END)
+        self.update_chat("You", user_message)  # Display only the user's input in chat
+        self.input_text.delete("1.0", tk.END)  # Clear the input box
 
-        # Handle AI response in a separate thread
-        threading.Thread(target=self.get_ai_response, args=(timed_message,)).start()
+        # Trim the conversation history to maintain the limit
+        self.trim_conversation_history()
+
+        # Get the current system time
+        current_time_formatted = time.strftime("%I:%M %p")  # Example: 08:23 PM
+        elapsed_time = self.get_elapsed_time() if self.last_message_time else "First interaction"
+        self.last_message_time = time.time()  # Update the last message time
+
+        # Combine the time information with the user message for the AI request
+        ai_message = f"[{current_time_formatted}: {elapsed_time} since last input] {user_message}"
+
+        # Send request to AI in a separate thread to avoid freezing the UI
+        threading.Thread(target=self.get_ai_response, args=(ai_message,)).start()
 
         return 'break'
+
+
 
     def send_image(self):
         """Send the last prompt (from user or AI) if none entered, or the user input directly to the image generation API."""
@@ -364,7 +384,7 @@ class PollinationsChatApp:
         """Request an AI response from Pollinations AI API and handle multiple responses (text + image)."""
         headers = {'Content-Type': 'application/json'}
         data = {
-            "messages": self.conversation_history,
+            "messages": self.conversation_history + [{"role": "system", "content": prompt}],
             "jsonMode": True
         }
 
