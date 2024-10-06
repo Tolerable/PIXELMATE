@@ -1,5 +1,7 @@
 # PixelMate
 
+![Screenshot-0001](https://github.com/user-attachments/assets/b572d4ca-19e3-458c-9997-df9160dc235a)
+
 PixelMate is a dynamic AI-based conversational assistant that can generate image prompts and hold interactive conversations. It leverages Pollinations.ai for generating images and tracks time to provide a more natural conversational experience.
 
 ## Features:
