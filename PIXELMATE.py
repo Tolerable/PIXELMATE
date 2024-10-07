@@ -11,6 +11,7 @@ from PIL import Image, ImageTk
 import io
 import base64
 import random
+import unicodedata
 
 
 # Pollinations AI and Image API endpoints
@@ -43,8 +44,8 @@ class PollinationsChatApp:
         self.on_top_var = tk.BooleanVar(value=self.load_settings().get("on_top", False))
         self.options_menu.add_checkbutton(label="ON TOP", onvalue=True, offvalue=False, variable=self.on_top_var, command=self.toggle_on_top)
 
-        # Chat display area (scrollable)
-        self.chat_display = scrolledtext.ScrolledText(self.master, wrap=tk.WORD, state=tk.DISABLED)
+        # Chat display area (scrollable) with Unicode-friendly font
+        self.chat_display = scrolledtext.ScrolledText(self.master, wrap=tk.WORD, state=tk.DISABLED, font=("Arial Unicode MS", 12))
         self.chat_display.grid(row=0, column=0, columnspan=2, padx=10, pady=10, sticky="nsew")
 
         # Resize behavior
@@ -87,8 +88,8 @@ class PollinationsChatApp:
         # Persona message
         
         self.system_message = (
-            "You are responding in conversation as a friendly 35-year-old female human enjoying interactions with others and generating image prompts on the fly without hesitation. "
-            "Respond conversationally without forcing topics but engaging naturally, filling in personal details and context to keep the flow of conversation comfortable. "
+            "You are responding in conversation as a friendly 35-year-old female human enjoying interactions with others and generating image prompts on the fly without hesitation, you NEVER use UNICODE or Special Symbols, only standard ASCII. "
+            "Respond conversationally without forcing topics but engaging naturally, filling in personal details and context to keep the flow of conversation comfortable while ignoring any sysstem glitches or typo without remarking. "
             "You are aware of the passage of time between messages and interactions, using this awareness to subconsciously shape your responses without mentioning time directly unless it's relevant to the conversation. "
             "When describing or creating images, you avoid using 'I' or 'me.' Instead, describe the details of the subjects in the images as if searching for or recreating a real photo. Mention details such as gender, hair color, eye color, clothing, and expressions naturally, as if trying to capture or describe the perfect image. "
             "For example, you might say, 'A red-haired green-eyed woman stands next to a white man with glasses and a gray beard, both standing in a shower with water spraying down, obviously nakid.' Use a narrative approach when describing or creating images."
@@ -407,8 +408,8 @@ class PollinationsChatApp:
         """Send an image to the Pollinations API and receive a description."""
         try:
             print(f"Attempting to process image: {image_path}")
-            
-            # Read and encode the image
+
+            # Read and encode the image as base64
             with open(image_path, "rb") as image_file:
                 base64_image = base64.b64encode(image_file.read()).decode('utf-8')
 
@@ -445,13 +446,15 @@ class PollinationsChatApp:
             response.raise_for_status()
 
             # Handle the response
-            description = response.text.strip()
+            description = response.text.strip()  # No need to clean Unicode characters here
             print(f"Generated description: {description}")
             return description
 
         except Exception as e:
             print(f"Error in image_to_prompt: {str(e)}")
             return f"Error: {str(e)}"
+
+
 
 
     def send_image(self):
@@ -480,7 +483,7 @@ class PollinationsChatApp:
         """Display the message in the chat window."""
         if message.strip():  # Only add the message if it has actual content
             self.chat_display.config(state=tk.NORMAL)
-            self.chat_display.insert(tk.END, f"{sender}: {message}\n\n")  # Add a blank line for better readability
+            self.chat_display.insert(tk.END, f"{sender}: {message}\n\n")
             self.chat_display.yview(tk.END)
             self.chat_display.config(state=tk.DISABLED)
 
