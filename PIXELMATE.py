@@ -12,6 +12,7 @@ import io
 import base64
 import random
 
+
 # Pollinations AI and Image API endpoints
 TEXT_API_URL = "https://text.pollinations.ai"
 IMAGE_API_URL = "https://image.pollinations.ai/prompt/"
@@ -181,7 +182,7 @@ class PollinationsChatApp:
                         "content": [
                             {
                                 "type": "text",
-                                "text": "Describe the image exactly as you see it."
+                                "text": "In a single English paragraph, describe the image exactly as you see it, including colors, genders, and any notable details. If nudity is detected include NUDITY with response."
                             },
                             {
                                 "type": "image_url",
@@ -368,39 +369,89 @@ class PollinationsChatApp:
         else:
             messagebox.showwarning("No Previous Prompt", "There is no previous image prompt to edit.")
 
+
     def paste_image_from_clipboard(self, event=None):
-        """Paste an image from the clipboard, convert it to text, and send the description as if it's from the user."""
+        """Paste an image from the clipboard, convert it to text, and send it as a user message to trigger AI response."""
         try:
             win32clipboard.OpenClipboard()
             if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_DIB):
+                # Get the image from the clipboard
                 image_data = win32clipboard.GetClipboardData(win32clipboard.CF_DIB)
                 image = Image.open(io.BytesIO(image_data))
                 win32clipboard.CloseClipboard()
 
-                # Resize for display (visually) but not for sending
-                image.thumbnail((420, 420))
-                image_for_display = ImageTk.PhotoImage(image)
-                self.display_image_in_chat(image_for_display, "Pasted Image")
+                # Save the image locally (to be sent as base64)
+                image_path = os.path.join(self.generated_folder, "clipboard_image.png")
+                image.save(image_path)
 
-                # Save the image to a temporary file for text description
-                temp_image_path = os.path.join(self.generated_folder, "clipboard_image.png")
-                image.save(temp_image_path)
+                # Use the existing image_to_prompt method to get the description
+                description = self.image_to_prompt(image_path)
+                
+                if description:
+                    # Send the description as if it was a user message to the AI
+                    user_message = f"Shares Image: {description}"
+                    self.conversation_history.append({"role": "user", "content": user_message})
+                    self.update_chat("You", user_message)  # Display in chat as a user message
 
-                # Send the image for description and act as if it's from the user
-                description = self.image_to_prompt(temp_image_path)
-                user_message = f"Image Shared With You: {description}"
-
-                # Add the message as if it's from the user, not from the AI
-                self.conversation_history.append({"role": "user", "content": user_message})
-                self.update_chat("You", user_message)
-                self.trim_conversation_history()  # Ensure the conversation history is properly trimmed
-
+                    # Send the message to the AI
+                    threading.Thread(target=self.get_ai_response, args=(user_message,)).start()
             else:
                 win32clipboard.CloseClipboard()
                 messagebox.showwarning("Clipboard Error", "No image found in clipboard.")
         except Exception as e:
             win32clipboard.CloseClipboard()
             messagebox.showerror("Clipboard Error", f"Failed to paste image from clipboard: {str(e)}")
+
+
+    def image_to_prompt(self, image_path):
+        """Send an image to the Pollinations API and receive a description."""
+        try:
+            print(f"Attempting to process image: {image_path}")
+            
+            # Read and encode the image
+            with open(image_path, "rb") as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+
+            # Construct the API request
+            api_url = "https://text.pollinations.ai/"
+            headers = {
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Image Shared With You:"  # Background context for the AI, not seen by the user
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "model": "openai",
+                "seed": -1,
+                "jsonMode": False
+            }
+
+            # Send the request
+            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+
+            # Handle the response
+            description = response.text.strip()
+            print(f"Generated description: {description}")
+            return description
+
+        except Exception as e:
+            print(f"Error in image_to_prompt: {str(e)}")
+            return f"Error: {str(e)}"
 
 
     def send_image(self):
