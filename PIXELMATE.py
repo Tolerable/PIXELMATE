@@ -63,13 +63,18 @@ class PollinationsChatApp:
         self.prompt_dropdown.bind("<<ComboboxSelected>>", self.populate_from_dropdown)
         self.update_prompt_dropdown()
 
-        # Direct image prompt button (Camera emoji)
-        self.send_image_button = tk.Button(self.master, text="📷", font=("Arial", 14), command=self.send_image)
+        # Direct image prompt button (Camera emoji) with both left and right-click functionality
+        self.send_image_button = tk.Button(self.master, text="📷", font=("Arial", 14))
         self.send_image_button.grid(row=1, column=1, padx=(5, 0), pady=10, sticky="w")
+        self.send_image_button.bind("<Button-1>", self.direct_send_image)  # Left-click sends the image directly
+        self.send_image_button.bind("<Button-3>", self.edit_last_prompt)  # Right-click allows editing
 
-        # Search button (Magnifying glass) for image selection and vision analysis
-        self.search_image_button = tk.Button(self.master, text="🔍", font=("Arial", 14), command=self.select_image_for_analysis)
+        # Search button (Magnifying glass) with left and right-click functionality
+        self.search_image_button = tk.Button(self.master, text="🔍", font=("Arial", 14))
         self.search_image_button.grid(row=1, column=1, padx=(50, 0), pady=10, sticky="w")
+        self.search_image_button.bind("<Button-1>", self.select_image_for_analysis)  # Left-click opens file dialog
+        self.search_image_button.bind("<Button-3>", self.paste_image_from_clipboard)  # Right-click pastes image from clipboard
+
 
         # Folder icon button to open the GENERATED folder
         self.open_folder_button = tk.Button(self.master, text="📂", font=("Arial", 14), command=self.open_generated_folder)
@@ -97,13 +102,12 @@ class PollinationsChatApp:
         self.image_menu = Menu(self.master, tearoff=0)
         self.image_menu.add_command(label="Copy Image", command=self.copy_image_to_clipboard)
 
-
     def trim_conversation_history(self):
-        """Limit conversation history to the last 10 exchanges."""
-        max_messages = 10  # 5 user + 5 AI = 10 total
-        if len(self.conversation_history) > max_messages:
-            self.conversation_history = self.conversation_history[-max_messages:]  # Trim oldest messages
+        """Ensure the conversation history has the system message and the last 10 exchanges (5 user + 5 AI)."""
+        max_messages = 10  # 5 user + 5 AI = 10 total exchanges (adjust if needed)
 
+        # Preserve system message and trim the last 10 messages
+        self.conversation_history = [{"role": "system", "content": self.system_message}] + self.conversation_history[-max_messages:]
 
     def load_history(self):
         """Load prompt history from a JSON file."""
@@ -161,7 +165,7 @@ class PollinationsChatApp:
         try:
             print(f"Attempting to process image: {image_path}")
             
-            # Read and encode the image
+            # Read and encode the image as base64
             with open(image_path, "rb") as image_file:
                 base64_image = base64.b64encode(image_file.read()).decode('utf-8')
 
@@ -205,6 +209,8 @@ class PollinationsChatApp:
         except Exception as e:
             print(f"Error in image_to_prompt: {str(e)}")
             return f"Error: {str(e)}"
+
+            
     def clean_response(self, response):
         """Clean AI responses to remove unnecessary JSON formatting."""
         try:
@@ -328,6 +334,73 @@ class PollinationsChatApp:
 
         return 'break'
 
+    def direct_send_image(self, event=None):
+        """Handle left-click on the camera button: either send input as image prompt or repeat the last image prompt."""
+        user_input = self.input_text.get("1.0", tk.END).strip()  # Get the text in the input box
+        
+        if user_input:  # If there's text in the input field, send it as a direct image prompt
+            self.conversation_history.append({"role": "user", "content": f"Direct Image Request: {user_input}"})
+            self.update_chat("You (Direct Image Request)", user_input)
+            self.update_prompt_history(user_input)  # Save the input as part of history
+            self.input_text.delete("1.0", tk.END)  # Clear the input field
+            
+            # Generate the image in a separate thread
+            threading.Thread(target=self.generate_image, args=(user_input,)).start()
+
+        else:  # If input field is empty, repeat the last image prompt (from user or AI)
+            last_image_prompt = self.get_last_image_prompt()  # Get the last image prompt from history
+            if last_image_prompt:
+                # Send the last image prompt directly
+                self.conversation_history.append({"role": "user", "content": f"Direct Image Request: {last_image_prompt}"})
+                self.update_chat("You (Direct Image Request)", last_image_prompt)
+                
+                # Generate the image with the last prompt in a separate thread
+                threading.Thread(target=self.generate_image, args=(last_image_prompt,)).start()
+            else:
+                messagebox.showwarning("No Previous Prompt", "There is no previous image prompt to resend.")
+
+    def edit_last_prompt(self, event=None):
+        """Insert the last image prompt (from user or AI) into the input field for editing."""
+        last_image_prompt = self.get_last_image_prompt()
+        if last_image_prompt:
+            self.input_text.delete("1.0", tk.END)  # Clear the input field
+            self.input_text.insert(tk.END, last_image_prompt)  # Insert the last image prompt
+        else:
+            messagebox.showwarning("No Previous Prompt", "There is no previous image prompt to edit.")
+
+    def paste_image_from_clipboard(self, event=None):
+        """Paste an image from the clipboard, convert it to text, and send the description as if it's from the user."""
+        try:
+            win32clipboard.OpenClipboard()
+            if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_DIB):
+                image_data = win32clipboard.GetClipboardData(win32clipboard.CF_DIB)
+                image = Image.open(io.BytesIO(image_data))
+                win32clipboard.CloseClipboard()
+
+                # Resize for display (visually) but not for sending
+                image.thumbnail((420, 420))
+                image_for_display = ImageTk.PhotoImage(image)
+                self.display_image_in_chat(image_for_display, "Pasted Image")
+
+                # Save the image to a temporary file for text description
+                temp_image_path = os.path.join(self.generated_folder, "clipboard_image.png")
+                image.save(temp_image_path)
+
+                # Send the image for description and act as if it's from the user
+                description = self.image_to_prompt(temp_image_path)
+                user_message = f"Image Shared With You: {description}"
+
+                # Add the message as if it's from the user, not from the AI
+                self.conversation_history.append({"role": "user", "content": user_message})
+                self.update_chat("You", user_message)
+                self.trim_conversation_history()  # Ensure the conversation history is properly trimmed
+
+            else:
+                win32clipboard.CloseClipboard()
+                messagebox.showwarning("Clipboard Error", "No image found in clipboard.")
+        except Exception as e:
+            win32clipboard.CloseClipboard()
+            messagebox.showerror("Clipboard Error", f"Failed to paste image from clipboard: {str(e)}")
 
 
     def send_image(self):
@@ -380,11 +453,17 @@ class PollinationsChatApp:
                 return message['content'].replace("Direct Image Request: ", "").replace("AI Image Prompt: ", "")
         return None
 
+
     def get_ai_response(self, prompt):
-        """Request an AI response from Pollinations AI API and handle multiple responses (text + image)."""
+        """Request an AI response from Pollinations AI API and ensure the system message + last 10 messages are included."""
         headers = {'Content-Type': 'application/json'}
+
+        # Trim conversation history and ensure the system message is included
+        self.trim_conversation_history()
+
+        # Send the system message + last 10 exchanges to the AI
         data = {
-            "messages": self.conversation_history + [{"role": "system", "content": prompt}],
+            "messages": self.conversation_history + [{"role": "user", "content": prompt}],
             "jsonMode": True
         }
 
@@ -393,8 +472,8 @@ class PollinationsChatApp:
             response.raise_for_status()
             ai_response = response.text.strip()
 
-            # Process multiple responses, if any (text + image prompt)
-            responses = ai_response.split("\n")  # Split by newline to handle multiple responses
+            # Process multiple responses (text + image prompt)
+            responses = ai_response.split("\n")  # Split by newline for handling multiple responses
 
             for single_response in responses:
                 cleaned_response, image_prompt = self.extract_image_prompt(single_response)
@@ -414,6 +493,7 @@ class PollinationsChatApp:
             print(f"Error: {e}")
 
 
+
     def extract_image_prompt(self, text):
         """Extract image prompt from the response using the MRKDWN format safely."""
         match = re.search(r'!\[MRKDWN\]\((.*?)\)', text)
@@ -431,33 +511,34 @@ class PollinationsChatApp:
             # Generate a random seed for the image to ensure uniqueness
             seed = random.randint(1000, 9999)
 
-            # Construct the image request URL with seed
+            # Construct the image request URL with seed and set resolution to 1024x1024
             full_url = f"{IMAGE_API_URL}/{requests.utils.quote(prompt)}?width=1024&height=1024&nologo=true&seed={seed}"
             self.update_status(f"Generating image (seed: {seed})...")
             response = requests.get(full_url, timeout=120)
             response.raise_for_status()
 
-            # Load the image and resize to 420x420 for display
+            # Load the image from the response and resize for display only
             image_data = Image.open(io.BytesIO(response.content))
-            image_data.thumbnail((420, 420))  # Resize for display
-            image = ImageTk.PhotoImage(image_data)
+            image_for_display = image_data.resize((420, 420))  # Resize only for visual display
+            image = ImageTk.PhotoImage(image_for_display)
 
             # Store reference to prevent garbage collection
             self.image_references.append(image)
 
-            # Save the image to the GENERATED folder with a unique name
+            # Save the image to the GENERATED folder with full resolution (1024x1024)
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             image_filename = f"image_{timestamp}_seed{seed}.png"
             image_path = os.path.join(self.generated_folder, image_filename)
-            image_data.save(image_path)
+            image_data.save(image_path)  # Save full-size image
             self.update_status(f"Copied {image_filename} to clipboard.")
 
-            # Display image directly in chat
+            # Display image directly in chat (resized visually)
             self.display_image_in_chat(image, image_path)
 
         except requests.RequestException as e:
             self.update_chat("System", "Failed to generate image.")
             print(f"Error: {e}")
+
 
     def display_image_in_chat(self, image, image_path):
         """Display an image directly in the chat window and bind right-click menu."""
